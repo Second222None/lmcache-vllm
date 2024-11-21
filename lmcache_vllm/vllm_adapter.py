@@ -374,6 +374,8 @@ def lmcache_should_store(
 
 @_lmcache_nvtx_annotate
 def lmcache_store_kv(
+    model_config: ModelConfig,
+    parallel_config: ParallelConfig,
     model_executable: torch.nn.Module,
     model_input: "ModelInputForGPUWithSamplingMetadata",
     cache_config: CacheConfig,
@@ -444,7 +446,9 @@ def lmcache_store_kv(
                     for layer_id in range(start_layer, end_layer):
                         kv_cache = kv_caches[layer_id - start_layer]
 
-                        _, _, num_heads, head_size = kv_cache[0].shape
+                        # _, _, num_heads, head_size = kv_cache[0].shape
+                        num_heads = model_config.get_num_kv_heads(parallel_config)
+                        head_size = model_config.get_head_size()
 
                         key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
                         value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
@@ -576,10 +580,9 @@ def lmcache_retrieve_kv(
                 if num_computed_tokens == total_seq_len:
                     lmc_num_computed_tokens -= 1
                     num_computed_tokens -= 1
-            
+
             num_computed_tokens_list.append(num_computed_tokens)
             lmc_num_computed_tokens_list.append(lmc_num_computed_tokens)
-            
             
             # No cache found, move on
             if lmc_num_computed_tokens == 0:
