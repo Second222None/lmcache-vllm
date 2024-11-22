@@ -417,6 +417,11 @@ def lmcache_store_kv(
     else:
         end_layer = len(kv_caches)
 
+    # For Turing GPU
+    num_heads = model_config.get_num_kv_heads(parallel_config)
+    head_size = model_config.get_head_size()
+    gpu_capability = torch.cuda.get_device_capability()
+
     seq_data_idx = 0
     seq_group_metadata_list = model_input.seq_group_metadata_list
     for seq_group_metadata in seq_group_metadata_list:
@@ -442,33 +447,23 @@ def lmcache_store_kv(
                 compute_slot_mapping(False, slot_mapping, seqid, seq_len, 
                     skip_leading_tokens, 0, vllm_block_size, seq_group_metadata.block_tables)
                 kv_tuple_list = []
-                gpu_capability = torch.cuda.get_device_capability()
-                
                 if len(slot_mapping) > 0:
                     for layer_id in range(start_layer, end_layer):
                         kv_cache = kv_caches[layer_id - start_layer]
-                        
-                        """Check the GPU architecture. 
+                        """
+                        Check the GPU architecture.
                         Some older GPUs (e.g. Turing, Volta) has different kv_caches shape
                         """
                         if (gpu_capability == (7, 5)):
-                            # Turing
-                            # kv_cache = [num_blocks, num_heads x head_size x block_size]
-                            logger.info(f"=====Capability={gpu_capability}")
-                            num_heads = model_config.get_num_kv_heads(parallel_config)
-                            head_size = model_config.get_head_size()
+                            # Turing. kv_cache has shape: [num_blocks, num_heads x head_size x block_size]
+                            key_cache = kv_cache[0].reshape(-1, num_heads, head_size, cache_config.block_size)
+                            value_cache = kv_cache[1].reshape(-1, num_heads, head_size, cache_config.block_size)
 
-                            _, num_heads_x_head_size = kv_cache[0].shape
-                            
-                            key_cache = kv_cache[0].reshape(-1, num_heads_x_head_size, cache_config.block_size)
-                            value_cache = kv_cache[1].reshape(-1, num_heads_x_head_size, cache_config.block_size)
-                            # logger.info(f"key_cache shape: {key_cache.shape}, value_cache shape: {value_cache.shape}")
-                            
-                            key_cache = key_cache.permute(0,2,1).reshape(-1, num_heads, head_size)
-                            value_cache = value_cache.permute(0,2,1).reshape(-1, num_heads, head_size)
+                            key_cache = key_cache.permute(0,3,1,2).reshape(-1, num_heads, head_size)
+                            value_cache = value_cache.permute(0,3,1,2).reshape(-1, num_heads, head_size)
                         else:
                             _, _, num_heads, head_size = kv_cache[0].shape
-                            
+
                             key_cache = kv_cache[0].reshape(-1, num_heads, head_size)
                             value_cache = kv_cache[1].reshape(-1, num_heads, head_size)
                         
